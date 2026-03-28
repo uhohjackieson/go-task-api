@@ -1,5 +1,7 @@
 package main
 
+var taskChannel = make(chan Task, 100)
+
 import (
 	"encoding/json"
 	"log"
@@ -17,6 +19,17 @@ var (
 	mutex sync.Mutex
 )
 
+func startWorker() {
+	go func() {
+		for t := range taskChannel {
+			mutex.Lock()
+			tasks = append(tasks, t)
+			mutex.Unlock()
+			log.Println("Processed task asynchronously:", t.Name)
+			}
+		}()
+}
+
 func getTasks(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -33,14 +46,17 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutex.Lock()
-	tasks = append(tasks, newTask)
-	mutex.Unlock()
+	// Send task to the channel to be processed asynchronously
+	taskChannel <- newTask
 
-	json.NewEncoder(w).Encode(newTask)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Task queued for processing",
+		"name":    newTask.Name,
+	})
 }
 
 func main() {
+	startWorker()
 	http.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			getTasks(w, r)
