@@ -1,72 +1,66 @@
 package main
 
-var taskChannel = make(chan Task, 100)
-
 import (
 	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
-)
+	)
 
+// Task represents a single to-do item
 type Task struct {
-	ID   int    `json:"id"`
+	ID int `json:"id"`
 	Name string `json:"name"`
+	Done bool `json:"done"`
 }
 
-var (
-	tasks []Task
-	mutex sync.Mutex
-)
+// in-memory storage
+var tasks []Task
+var mutex = &sync.Mutex{}
+var nextID = 1
 
-func startWorker() {
-	go func() {
-		for t := range taskChannel {
-			mutex.Lock()
-			tasks = append(tasks, t)
-			mutex.Unlock()
-			log.Println("Processed task asynchronously:", t.Name)
-			}
-		}()
+func tasksHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+		case "GET":
+			getTasks(w)
+		case "POST":
+			createTask(w, r)
+		default: http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 }
 
-func getTasks(w http.ResponseWriter, r *http.Request) {
+func get Tasks(w http.ResponseWriter) {
 	mutex.Lock()
 	defer mutex.Unlock()
-
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tasks)
 }
 
 func createTask(w http.ResponseWriter, r *http.Request) {
 	var newTask Task
-
 	err := json.NewDecoder(r.Body).Decode(&newTask)
 	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
-	}
+		}
+	mutex.Lock()
+	newTask.ID = nextID
+	nextID++
+	tasks = append(tasks, newTask)
+	mutex.Unlock()
 
-	// Send task to the channel to be processed asynchronously
-	taskChannel <- newTask
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Task queued for processing",
-		"name":    newTask.Name,
-	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(newTask)
 }
 
 func main() {
-	startWorker()
-	http.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			getTasks(w, r)
-		} else if r.Method == http.MethodPost {
-			createTask(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	http.HandleFunc("/tasks", tasksHandler)
 
 	log.Println("Server running on :8080")
-	http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		log.Fatal(err)
+		}
 }
+
+
